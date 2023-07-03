@@ -60,12 +60,15 @@ kernel_cols = 3
 num_kernels = 16
 
 # рассчитывает количество позиций, в которых каждое ядро свертки может быть применено к входному изображению без выхода за его границы
-hidden_size = ((input_rows - kernel_rows) * (input_cols - kernel_cols)) * num_kernels
+mask_offset = 1
+rows_offes_count = int(((input_rows - kernel_rows) / mask_offset) + 1)
+cols_offes_count = int(((input_cols - kernel_cols) / mask_offset) + 1)
+hidden_size = rows_offes_count * cols_offes_count * num_kernels
 
 # Веса сверточного слоя (9, 16)
 kernels = 0.02 * np.random.random((kernel_rows * kernel_cols, num_kernels)) - 0.01
 
-# Веса выходного слоя (10000, 10)
+# Веса выходного слоя (10816, 10)
 weights_1_2 = 0.2 * np.random.random((hidden_size, num_labels)) - 0.1
 
 # Извлекает часть изображения
@@ -87,34 +90,34 @@ for j in range(iterations):
         layer_0 = images[batch_start:batch_end]
         
         # Превращаем входные данные из массива векторов (128, 784) в матрицу (128, 28, 28)
-        layer_0 = layer_0.reshape(layer_0.shape[0], 28, 28)
+        layer_0 = layer_0.reshape(layer_0.shape[0], input_rows, input_cols)
 
-        # Формируем массив из 625 матриц представляющих фрагменты изображений (128, 1, 3, 3)
+        # Формируем массив из 676 матриц представляющих фрагменты изображений (128, 1, 3, 3)
         sects = list()
-        for row_start in range(layer_0.shape[1] - kernel_rows):
-            for col_start in range(layer_0.shape[2] - kernel_cols):
+        for row_start in range(rows_offes_count):
+            for col_start in range(cols_offes_count):
                 sect = get_image_section(layer_0, row_start, row_start + kernel_rows, col_start, col_start + kernel_cols)
                 sects.append(sect)
         
-        # Меняем формат с (625, 128, 1, 3, 3) на (128, 625, 3, 3)
+        # Меняем формат с (676, 128, 1, 3, 3) на (128, 676, 3, 3)
         expanded_input = np.concatenate(sects, axis=1)
         
         # Разворачиваем сверточный слой
-        # (128, 625, 3, 3) в (80000, 9)
+        # (128, 676, 3, 3) в (86528, 9)
         es = expanded_input.shape
         flattened_input = expanded_input.reshape(es[0] * es[1], -1)
         
         # kernel_output - слой между layer_0 и layer_1, kernels - маска/фильтр
-        # (80000, 9) * (9, 16) = (80000, 16)
-        # Если убрать пачки и прогонять по 1 записи: (625, 9) * (9, 16) = (625, 16)
+        # (86528, 9) * (9, 16) = (86528, 16)
+        # Если убрать пачки и прогонять по 1 записи: (676, 9) * (9, 16) = (676, 16)
         kernel_output = flattened_input.dot(kernels)
 
-        # Прогоняем через функцию активации скрытого слоя матрицу преобразованную из (80000, 16) в (128, 10000)
-        # 80000 = 625 * 128, 625 - возможные комбинаций 1 маски на 128 - размер пачки изображений
+        # Прогоняем через функцию активации скрытого слоя матрицу преобразованную из (86528, 16) в (128, 10816)
+        # 86528 = 676 * 128, 676 - возможные комбинаций 1 маски на 128 - размер пачки изображений
         # 16 - количество масок
         # в
         # 128 - количество масок
-        # 10000 - размер скрытого слоя
+        # 10816 - размер скрытого слоя
         layer_1 = tanh(kernel_output.reshape(es[0], -1))
 
         # Для избежания переобучения случайный образом отключаем половину нейронов,
@@ -122,7 +125,7 @@ for j in range(iterations):
         dropout_mask = np.random.randint(2, size=layer_1.shape)
         layer_1 *= dropout_mask * 2
 
-        # softmax((128, 10000) * (10000, 10) = (128, 10))
+        # softmax((128, 10816) * (10816, 10) = (128, 10))
         layer_2 = softmax(np.dot(layer_1, weights_1_2))
 
         for k in range(batch_size):
@@ -146,12 +149,12 @@ for j in range(iterations):
 
     for i in range(len(test_images)):
         layer_0 = test_images[i:i + 1]
-        layer_0 = layer_0.reshape(layer_0.shape[0], 28, 28)
+        layer_0 = layer_0.reshape(layer_0.shape[0], input_rows, input_cols)
         layer_0.shape
 
         sects = list()
-        for row_start in range(layer_0.shape[1]-kernel_rows):
-            for col_start in range(layer_0.shape[2] - kernel_cols):
+        for row_start in range(rows_offes_count):
+            for col_start in range(cols_offes_count):
                 sect = get_image_section(layer_0, row_start, row_start + kernel_rows, col_start, col_start + kernel_rows)
                 sects.append(sect)
         
